@@ -1,5 +1,4 @@
-﻿
-/*
+﻿/*
 AS() = 收到Client的验证请求 -> 在KDC数据库中查找用户主体名称 -> if 找到匹配的项 then 获取主体私钥userKey -> 生成会话密钥sessionKey1和票证TGT1,用userKey加密为resp -> 向Client回复resp -> AS();
 																else 回复错误消息 -> AS()
 
@@ -22,11 +21,12 @@ Client_Use() = 向AppServ发送访问的具体信息 -> 接受来自AppServ访�
 AppServ() = [收到Client的验证信息(TGT2和验证者) -> 用sessionKey2解密 -> if 验证通过 then 回复通过 -> AppServ()] | [收到Client的访问信息 -> (if 已验证 then 回复访问信息 else 回复错误) -> AppServ()];
 
 */
+
+//【Channel definition】
 channel C_AS 0;
 channel AS_C 0;
 channel C_TGS 0;
 channel TGS_C 0;
-channel TGS_KRB 0;
 channel C_App 0;
 channel App_C 0;
 
@@ -37,10 +37,42 @@ TGS() = C_TGS?msg -> TGS_C!msg -> TGS();
 AppServ() = C_App?msg -> App_C?msg -> AppServ();
 */
 
-channel CPre_AS 0;
-channel C
 
+//==================================================================================
+
+//【AS Acknowledge】
+var as_uname = -1;
+var as_ukey = -1;
+var min_uname = 0;
+var max_uname = 5;
+var sessionKey1 = 60;
+//TGT_i must be encrypted by sessionKey_i, whenever process know the sessionKey_i, we assume it can get the plaintext of TGT_i.
+var TGT1 = 61;
 //using array to simulate KDC database, the index is user id, and the value is correspond user private key. 
-var KDC_DB = [0,1,2,3,4,5];
+var KDC_DB = [min_uname..max_uname];
 
-AS() = CPre_AS?3 -> 
+//【AS process】
+AS() = C_AS?y {as_uname=y;} -> if(min_uname<=as_uname && as_uname<=max_uname) {
+                                  _getukey {as_ukey=KDC_DB[as_uname]} -> _genresp -> AS_C!1;//greater than 0 means uname was found
+                              } else {
+                                  AS_C!-1;//less than 0 means uname wasn't found
+                              } -> AS();
+
+//==================================================================================
+
+//【Client Acknowledge】
+var c_uname = 3;//initial setting, a real Client must know its user name.
+var asresp = -1;//receive from AS
+var c_ukey = 3;//initial setting, a real Client must know its user key.
+var c_sessionKey1 = -1;
+var c_TGT1 = -1;
+
+//【Client process(communicate with AS)】 which is the first step of authentication.
+Client_Pre() = C_AS!c_uname -> AS_C?y {asresp=y;} -> if(asresp==-1 && c_ukey!=-1 && c_ukey==as_ukey) {
+                                                         _getresp {c_sessionKey1 = sessionKey1; c_TGT1 = TGT1;} -> Client_Mid();
+                                                     } else {
+                                                         Client_Pre();
+                                                     } -> Stop;
+
+
+
