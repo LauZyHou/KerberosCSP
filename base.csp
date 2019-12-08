@@ -1,18 +1,25 @@
 ﻿//【通道声明】
 //以下，通道'M_N'总是表征符号'_'左侧的进程'M'向右侧的进程'N'发消息的单工通道
+//Client和AS交互的通道
 channel C_AS 0;
 channel AS_C 0;
+//Client和TGS交互的通道
 channel C_TGS 0;
 channel TGS_C 0;
+//Client和AppServ验证用的通道
 channel C_App 0;
 channel App_C 0;
+//Clinet和AppServ完成验证后，交互信息用的通道
+channel C_App_ 0;
+channel App_C_ 0;
 
 //【其它】
 //服务密钥，这里表现为将sessionKey封装为TGS所需乘上的因子，这个知识被AS和TGS共享
 #define sk2t 6;
+//用户数量
+#define UN 6;
 
 /*
-Client() = C_AS!msg -> AS_C?msg -> C_TGS!msg -> TGS_C?msg -> C_App!msg -> App_C?msg -> Skip;
 AS() = C_AS?msg -> AS_C!msg -> AS();
 TGS() = C_TGS?msg -> TGS_C!msg -> TGS();
 AppServ() = C_App?msg -> App_C?msg -> AppServ();
@@ -23,9 +30,9 @@ AppServ() = C_App?msg -> App_C?msg -> AppServ();
 //【AS先验知识】
 //数组的最小最大游标，这里用于模拟判断用户主体是否在数据库中
 var min_uname = 0;
-var max_uname = 5;
+var max_uname = UN-1;
 //使用数组模拟KDC数据库，下标表示uname，而相应的值表示ukey
-var KDC_DB = [0..5];
+var KDC_DB = [0..UN-1];
 //AS生成的sessionKey1明文
 var sessionKey1 = 11;
 //AS生成的票证TGT1明文，其中存储了sessionKey1的信息，也就是拿到TGT1可以解包得到sessionKey1
@@ -43,8 +50,8 @@ AS() = C_AS?y { as_uname=y; } -> //从Client接收用户主体名称
            as_getukey { as_ukey=KDC_DB[as_uname]; } -> //解析出ukey
            as_enc { TGT1=TGT1*as_ukey; sessionKey1=sessionKey1*as_ukey; } -> //用ukey对TGT1和sessionKey1加密
            AS_C!sessionKey1.TGT1 -> //将加密的<sessionKey1,TGT1>发回给Client
-           as_reset1 { TGT1=TGT1/as_ukey; sessionKey1=sessionKey1/as_ukey; } -> //重置AS生成的TGT1和sessionKey1
-           as_reset2 { as_uname=-1; } -> //重置导出知识(这里不重置as_ukey，因为Client要根据这个判断是否有能力解密)
+           as_reset1 { TGT1=TGT1/as_ukey; sessionKey1=sessionKey1/as_ukey; } -> //*重置AS生成的TGT1和sessionKey1
+           as_reset2 { as_uname=-1; } -> //*重置导出知识(这里不重置as_ukey，因为Client要根据这个判断是否有能力解密)
            AS()
        } else { //在数据库中找不到uname
            AS_C!-1.-1 -> AS()
@@ -101,8 +108,8 @@ TGS() = C_TGS?un.tgt.auth { tgs_uname=un; tgs_TGT1=tgt; tgs_auth1=auth; } -> //�
         if(tgs_uname!=-1 && tgs_uname2==tgs_uname && min_uname<=tgs_uname && tgs_uname<=max_uname) { //解密得出的uname2和用户自称的uname一致，说明验证通过
             tgs_enc { TGT2=TGT2*tgs_sessionKey1; sessionKey2=sessionKey2*tgs_sessionKey1; } -> //用sessionKey1为TGT2和sessionKey2加密
             TGS_C!sessionKey2.TGT2 -> //将加密的<sessionKey2,TGT2>发回给Client
-            tgs_reset1 { TGT2=TGT2/tgs_sessionKey1; sessionKey2=sessionKey2/tgs_sessionKey1; } -> //重置TGS生成的TGT2和sessionKey2
-            tgs_reset2 { tgs_uname=tgs_uname2=tgs_TGT1=tgs_auth1=-1 } -> //重置导出知识(这里不重置tgs_sessionKey1，因为Client要根据这个判断是否有能力解密)
+            tgs_reset1 { TGT2=TGT2/tgs_sessionKey1; sessionKey2=sessionKey2/tgs_sessionKey1; } -> //*重置TGS生成的TGT2和sessionKey2
+            tgs_reset2 { tgs_uname=tgs_uname2=tgs_TGT1=tgs_auth1=-1 } -> //*重置导出知识(这里不重置tgs_sessionKey1，因为Client要根据这个判断是否有能力解密)
             TGS()
         } else { //验证不通过
             TGS_C!-1.-1 -> TGS()
@@ -111,7 +118,7 @@ TGS() = C_TGS?un.tgt.auth { tgs_uname=un; tgs_TGT1=tgt; tgs_auth1=auth; } -> //�
 //==================================================================================
 
 //【为了与TGS通信，临时制造的知识】-1表示该知识尚未制造
-//验证者1，使用Client1获取的sessionKey1对uname进行加密得来
+//验证者1，使用Client获取的sessionKey1对uname进行加密得来
 var auth1 = -1;
 
 //注：auth意为authenticator
@@ -123,7 +130,7 @@ var c_TGT2 = -1;
 //【与TGS通信的Client子进程定义】
 Client_Mid() = gen_auth1 { auth1=c_uname*c_sessionKey1; } -> //用sessionKey1对uname加密，生成验证者1
                C_TGS!c_uname.c_TGT1.auth1 -> //将<uname,TGT1,验证者1>发送给TGS
-               TGS_C?sk.tgt { c_sessionKey2=sk; c_TGT2=tgt; } -> //接收到TGS发回来的加密后的sessionKey2和TGT2
+               TGS_C?sk2.tgt { c_sessionKey2=sk2; c_TGT2=tgt; } -> //接收到TGS发回来的加密后的sessionKey2和TGT2
                if(c_sessionKey2!=-1 && c_TGT2!=-1 && c_sessionKey1!=-1 && c_sessionKey1==tgs_sessionKey1) { //如果有解密能力，即sessionKey1正确
                   cmid_dec { c_TGT2=c_TGT2/c_sessionKey1; c_sessionKey2=c_sessionKey2/c_sessionKey1; } -> //解密得到TGT2和sessionKey2
                   Client_Post()
@@ -133,5 +140,97 @@ Client_Mid() = gen_auth1 { auth1=c_uname*c_sessionKey1; } -> //用sessionKey1对
 
 //==================================================================================
 
-Client_Post() = Stop;
+//【AppServ先验知识】
+//使用数组模拟用户是否已经通过验证，下标表示uname，而相应的值表示是否处在连接状态(0:连接，1:未连接)
+var AUTHED = [0(UN)];
+
+//另：AppServ也能访问KDC数据库，即访问数组KDC_DB和变量min_uname,max_uname
+
+//【经与Client交互(认证)，导出的新知识】-1表示该知识尚未获取
+//AppServ接收到的用户主体名称
+var app_uname = -1;
+//AppServ解析出的sessionKey2
+var app_sessionKey2 = -1;
+//AppServ从接收到的验证者2经TGT2中封装的sessionKey2解密得到的uname
+var app_uname2 = -1;
+//AppServ接收到的TGT1
+var app_TGT2 = -1;
+//AppServ接收到的验证者2
+var app_auth2 = -1;
+
+//【经与Client交互(交换信息)，导出的新知识】-1表示该知识尚未获取
+var recv_cpos = -1;
+
+
+//【AppServ进程定义】
+App_Serv() = (
+                 C_App?un.tgt.auth { app_uname=un; app_TGT2=tgt; app_auth2=auth; } -> //接收到Client尝试验证而发来的<uname,TGT2,验证者2>
+                 app_reset1 { app_sessionKey2=app_uname2=-1; } -> //*重置其它导出知识
+                 app_getsk2 { app_sessionKey2=app_TGT2/sk2t; } -> //对TGT2解包得到sessionKey2
+                 app_dec { app_uname2=app_auth2/app_sessionKey2; } -> //用sessionKey2对验证者2解密得出uname2
+                 if(app_uname!=-1 && app_uname2==app_uname && min_uname<=app_uname && app_uname<=max_uname) { //解密得出的uname2和用户自称的uname一致，说明验证通过
+                     App_C!1 -> //回复1表示验证通过
+                     save_u { AUTHED[app_uname]=1; } -> //记录该用户已验证过
+                     App_Serv()
+                 } else {
+                     App_C!-1 -> //回复-1表示验证不通过
+                     App_Serv()
+                 }
+             )
+             []
+             (
+                 C_App_?un.msg { app_uname=un; recv_cpos=msg; } -> //接收到Client尝试交换信息而发来的<uname,msg>
+                 if(app_uname!=-1 && min_uname<=app_uname && app_uname<=max_uname && AUTHED[app_uname]==1) { //接收到的用户名在数据库中，且记录了已经验证过
+                     App_C_!recv_cpos -> //原样回复
+                     App_Serv()
+                 } else { //数据库中无此用户，或此用户没有验证过
+                     App_C_!-1 -> //回复错误信息
+                     App_Serv()
+                 }
+             );
+
+//==================================================================================
+
+//【为了与AppServ建立连接，临时制造的知识】-1表示该知识尚未制造
+//验证者2，使用Client获取的sessionKey2对uname进行加密得来
+var auth2 = -1;
+
+//【经与AppServ交互，导出的新知识】-1表示该知识尚未获取
+var recv_state = -1;
+
+//【与AppServ建立连接的Client子进程定义】
+Client_Post() = cpos_reset { auth2=recv_state=-1; } -> //*重置导出知识
+                gen_auth2 { auth2=c_uname*c_sessionKey2; } -> //用sessionKey2对uname加密，生成验证者2
+                C_App!c_uname.c_TGT2.auth2 -> //将<uname,TGT2,验证者2>发送给AppServ
+                App_C?y { recv_state=y; } -> //接收到服务器返回的消息，1表示验证通过，-1表示验证不通过
+                if(recv_state==1) { //验证通过
+                    Client_Use()
+                } else { //验证不通过
+                    Client_Pre()
+                };
+
+//==================================================================================
+
+//【经与AppServ交互，导出的新知识】-1表示该知识尚未获取
+var recv_app = -1;
+
+//【与AppServ建立连接的Client子进程定义】
+Client_Use() = C_App_!c_uname.666 -> //向AppServ发送访问信息，约定发送的消息不能是-1
+               App_C_?msg { recv_app=msg; } -> //接收AppServ回复的消息
+               if(recv_app!=-1) { //接收到的值!=-1表明是正常交互
+                  Client_Use() //回过去继续发消息，[todo]加入"进入断开连接的进程"的可能
+               } else { //否则是异常交互
+                  Stop
+               };
+
+//==================================================================================
+
+//【总的进程】
+Client() = Client_Pre() || Client_Mid() || Client_Post() || Client_Use();
+Kerberos() = Client() || AS() || TGS() || App_Serv();
+
+//==================================================================================
+
+//【模型检验】
+#assert Kerberos() deadlockfree;
 
