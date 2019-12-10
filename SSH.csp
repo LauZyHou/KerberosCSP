@@ -1,0 +1,141 @@
+﻿﻿//【通道声明】
+//以下，通道'M_N'总是表征符号'_'左侧的进程'M'向右侧的进程'N'发消息的单工通道
+ // client 向server 发送请求 ，request
+channel C_SR 0 ;  
+// server 向 client 发送加密质询 ，challenge
+channel S_CC 0 ;  
+// client 向 server 发送解密质询 ，challenge
+channel C_SC 0 ;  
+// server 向 client 发送是否能够验证通过 ，response
+channel S_CR 0 ;
+// clienr 和 server 通信 ,information
+channel C_SI 0 ;
+channel S_CI 0 ;
+ 
+ 
+﻿//【通信过程】
+/* 	1、Client 生成公钥、私钥
+	2、公钥 手动放到服务器
+	3、client发送公钥 ，请求连接
+	4、Server收到请求，在公钥中寻找，if 找到 then 返回 公钥加密质询 else 验证失败
+	5、client私钥解密质询，将质询发给server
+	6、sever收到质询和之前生成的质询对比，if 匹配 then 建立通信 else 验证失败
+*/
+
+//==================================================================================
+// 基础变量定义
+var client_name = 1 ;  // client名称
+var client_PK = 2 ;    // client公钥
+var client_PK2 = 4 ;   // client私钥
+var challenge = 3 ;    // 质询是随机生成的数字或者字符串
+var PublicKey_DB = [0..5] ; // 服务器上存放的所有的客户端的公钥
+var MinPK = 0 ; // 服务器上存放公钥的最小值 
+var MaxPK = 5 ; // 服务器上存放公钥的最大值 ，用来判断client发送的公钥是否在服务器中
+var ench = -1 ; // 加密后的质询
+var dech = -1 ; // 解密后的质询
+var msg = -1 ;  // 通信发送信息内容 ,正常发送的消息不能为-1
+var verify_state = -1 ;   // client和server之间是否已经建立通信
+var verify_approve = -1 ; // client 向server 发送解密质询后server返回验证结果，验证是否通过
+
+// 定义加密解密算法，主要用于质询加密解密
+#define key 2 ; // // 加密乘以key ，解密除以key
+
+
+//==================================================================================
+// 进程定义
+
+﻿//【Client_Pre()进程定义】
+//Client_Pre() = 向Server发送访问请求 -> 接收来自Server的加密质询 -> 解密质询 -> 向Server发送解密后的质询 -> Client_Post()
+Client_Pre() = C_SR!client_PK    // 将client的公钥发给server(发送连接请求)
+			-> S_CC?y { ench = y; } // 收到server发的消息
+			-> if (ench == -1){  // 没有找到公钥
+				Client_Pre()
+				}
+				else{  // 找到公钥 ，收到加密后的质询
+					decryption_challenge { dech=ench/key ;} // 解密质询
+					->C_SC!dech // 将解密后的质询发送给server
+					->Client_Post()  
+				};
+
+
+//==================================================================================
+
+﻿//【Client_Post()进程定义】	
+//Client_Post() = 接收server的消息 -> (if 允许访问 then Client_use() else client_Pre())		
+Client_Post() =	 S_CR?y {verify_approve = y ;}// 收到server的验证是否通过消息
+				->if(verify_approve == -1){ // 验证不通过
+					Client_Pre()
+				}else{ // 验证通过
+					Client_Use()
+				};
+
+
+//==================================================================================			
+				
+﻿//【Client_use()进程定义】
+//Client_Use() = 向Server发送访问的具体信息 -> 接受来自Server访问的具体信息 -> (if 不是错误信息 then Client_Use() else Stop) ;
+Client_Use() = C_SI!65 // 向Server发送访问的具体信息
+				-> S_CI?y{ msg=y; }//接受来自Server访问的具体信息
+				-> if(msg == -1){ //如果是错误信息
+					Stop
+					}else{
+					Client_Use()
+					};
+
+//==================================================================================
+
+﻿//【Server()进程定义】
+/*Server() = [收到Client的访问请求->在文件中找公钥是否存在-> (if 存在 then 发送加密的质询 else 回复错误) -> Server()] 
+		  | [收到Client的解密后的质询 -> (和加密前的质询对比 -> if 一致 then 回复通过 else 回复错误) -> Server()]
+		  | [收到Client的访问信息 -> (if 已验证 then 回复访问信息 else 回复错误) -> Server()];
+		  */
+﻿//【Server进程定义】
+
+var S_PK = -1 ; // server收到的公钥
+Server() = (
+			C_SR?y { S_PK=y; } // 收到Client的访问请求
+			->if(S_PK >= MinPK && S_PK <= MaxPK){ // 如果公钥存在
+				encryption_challenge{ ench=challenge*key ; } //加密质询
+				->S_CC!ench //发送加密的质询
+				->Server()
+			  }else{
+				S_CC!-1 // 没有找到公钥，回复错误
+				->Server()
+			  }
+			)
+		[]
+		(
+			C_SC?y{dech=y;}
+			->if(dech == challenge){ // 如果收到的解密质询和之前的一致
+				If_Verify{verify_state = 1; } // 将client和server之间的验证关系改为验证成功
+				->S_CR!1 //回复通过
+				->Server()
+			  }else{  // 如果收到的解密质询和之前的不一致，回复错误
+				S_CC!-1 
+				->Server()
+			  }
+		)
+		[]
+		(
+			C_SI?y{msg=y;}
+			->if(verify_state == -1){ // client和server之间没有验证通过
+				S_CI!-1 //回复错误
+				->Server()
+			  }else{ // 如果已经验证成功
+				S_CI!msg 
+				->Server()
+			  }
+		);
+
+
+//==================================================================================
+
+//【总的进程】
+
+SSH() = Client_Pre()  || Server();
+
+//==================================================================================
+
+//【模型检验】
+
+#assert SSH() deadlockfree;
