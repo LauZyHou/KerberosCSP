@@ -218,7 +218,7 @@ var recv_app = -1;
 Client_Use() = C_App_!c_uname.666 -> //向AppServ发送访问信息，约定发送的消息不能是-1
                App_C_?msg { recv_app=msg; } -> //接收AppServ回复的消息
                if(recv_app!=-1) { //接收到的值!=-1表明是正常交互
-                  Client_Use() //回过去继续发消息，[todo]加入"进入断开连接的进程"的可能
+                  success_recv -> Client_Use() //回过去继续发消息，[todo]加入"进入断开连接的进程"的可能
                } else { //否则是异常交互
                   Stop
                };
@@ -231,5 +231,12 @@ Kerberos() = Client_Pre() || AS() || TGS() || App_Serv();
 //==================================================================================
 
 //【模型检验】
+//无死锁
 #assert Kerberos() deadlockfree;
+//不发散
+#assert Kerberos() divergencefree;
+//不终止
+#assert Kerberos() nonterminating;
+//状态success_recv(标志Client成功接收到AppServ返回的正确信息)能无限经常次出现
+#assert Kerberos() |= []<>success_recv;
 
