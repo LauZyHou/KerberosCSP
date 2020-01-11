@@ -79,7 +79,7 @@ Client_Use() = C_SI!65 // 向Server发送访问的具体信息
 				-> if(msg == -1){ //如果是错误信息
 					Stop
 					}else{
-					Client_Use()
+					success_recv -> Client_Use()
 					};
 
 //==================================================================================
@@ -138,4 +138,20 @@ SSH() = Client_Pre()  || Server();
 
 //【模型检验】
 
+//无死锁
+
 #assert SSH() deadlockfree;
+
+
+//不发散
+
+#assert SSH() divergencefree;
+
+//不终止
+
+#assert SSH() nonterminating;
+
+//状态success_recv(标志Client成功接收到AppServ返回的正确信息)能无限经常次出现
+
+#assert SSH() |= []<>success_recv;
+
