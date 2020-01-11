@@ -44,8 +44,8 @@ var verify_approve = -1 ; // client 向server 发送解密质询后server返回�
 //==================================================================================
 // 进程定义
 
+//Client_Pre() = 向Server发送访问请求 -> 接收来自Server的消息 -> (if 没有找到公钥 -> Client_Pre() else 找到公钥收到加密质询 -> 解密质询 -> 向Server发送解密后的质询 -> Client_Post());
 ﻿//【Client_Pre()进程定义】
-//Client_Pre() = 向Server发送访问请求 -> 接收来自Server的加密质询 -> 解密质询 -> 向Server发送解密后的质询 -> Client_Post()
 Client_Pre() = C_SR!client_PK    // 将client的公钥发给server(发送连接请求)
 			-> S_CC?y { ench = y; } // 收到server发的消息
 			-> if (ench == -1){  // 没有找到公钥
@@ -60,8 +60,8 @@ Client_Pre() = C_SR!client_PK    // 将client的公钥发给server(发送连接�
 
 //==================================================================================
 
+//Client_Post() = 接收server的消息 -> (if 验证通过 then Client_use() else client_Pre());
 ﻿//【Client_Post()进程定义】	
-//Client_Post() = 接收server的消息 -> (if 允许访问 then Client_use() else client_Pre())		
 Client_Post() =	 S_CR?y {verify_approve = y ;}// 收到server的验证是否通过消息
 				->if(verify_approve == -1){ // 验证不通过
 					Client_Pre()
@@ -71,9 +71,11 @@ Client_Post() =	 S_CR?y {verify_approve = y ;}// 收到server的验证是否通�
 
 
 //==================================================================================			
-				
-﻿//【Client_use()进程定义】
+		
+		
 //Client_Use() = 向Server发送访问的具体信息 -> 接受来自Server访问的具体信息 -> (if 不是错误信息 then Client_Use() else Stop) ;
+﻿//【Client_use()进程定义】
+
 Client_Use() = C_SI!65 // 向Server发送访问的具体信息
 				-> S_CI?y{ msg=y; }//接受来自Server访问的具体信息
 				-> if(msg == -1){ //如果是错误信息
